@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全功能台股觀測站 - RWD 專業版</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-4 sm:p-6 text-sm sm:text-base">
+
+    <div class="max-w-6xl mx-auto space-y-6">
+        <!-- 頂部標題 -->
+        <header class="border-b border-gray-800 pb-4 text-center sm:text-left">
+            <h1 class="text-xl sm:text-2xl font-bold text-emerald-400">🏢 全台股上市觀測站 (含本地備份功能)</h1>
+            <p class="text-xs text-gray-400 mt-1">定存基準：<span class="text-amber-400 font-bold">1.70%</span> | 支援 RWD 手機瀏覽與個人自訂清單</p>
+        </header>
+
+        <!-- 主控制面板 -->
+        <div class="bg-gray-800 p-4 rounded-xl shadow-lg flex flex-col sm:flex-row gap-4 items-stretch sm:items-end">
+            <div class="flex-1 min-w-[120px]">
+                <label class="block text-xs text-gray-400 mb-1 font-semibold">股票代碼</label>
+                <input type="text" id="stockId" value="2330" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-white focus:outline-none focus:border-emerald-500">
+            </div>
+            <div class="flex-1 min-w-[150px]">
+                <label class="block text-xs text-gray-400 mb-1 font-semibold">起始日期</label>
+                <input type="date" id="startDate" value="2025-01-01" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-white focus:outline-none focus:border-emerald-500">
+            </div>
+            <div class="flex gap-2">
+                <button id="fetchBtn" class="flex-1 sm:flex-initial bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-5 py-1.5 rounded transition shadow-md cursor-pointer whitespace-nowrap">
+                    分析主圖
+                </button>
+                <button id="addFavBtn" class="bg-amber-600 hover:bg-amber-500 text-white font-medium px-4 py-1.5 rounded transition shadow-md cursor-pointer whitespace-nowrap">
+                    ⭐ 加最愛
+                </button>
+            </div>
+            <div id="loadingStatus" class="text-xs text-amber-400 self-center animate-pulse hidden">
+                連線中...
+            </div>
+        </div>
+
+        <!-- 主數據字卡 (RWD: 手機單欄，桌面三欄) -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
+                <p class="text-xs text-gray-400 font-medium">最新本益比 (PE)</p>
+                <p id="peValue" class="text-xl sm:text-2xl font-bold text-amber-400 mt-1">--</p>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
+                <div class="flex justify-between items-center">
+                    <p class="text-xs text-gray-400 font-medium">最新殖利率</p>
+                    <div class="flex items-center gap-1.5 bg-gray-900/50 px-2 py-0.5 rounded-full border border-gray-700">
+                        <span id="statusLight" class="w-2 h-2 rounded-full bg-gray-500"></span>
+                        <span id="statusText" class="text-[10px] text-gray-400 font-bold">未對比</span>
+                    </div>
+                </div>
+                <p id="yieldValue" class="text-xl sm:text-2xl font-bold text-emerald-400 mt-1">-- %</p>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
+                <p class="text-xs text-gray-400 font-medium">最新股價淨值比 (PB)</p>
+                <p id="pbValue" class="text-xl sm:text-2xl font-bold text-blue-400 mt-1">--</p>
+            </div>
+        </div>
+
+        <!-- 圖表區 (外層包覆彈性高度控制，防 RWD 爆版) -->
+        <div class="bg-gray-800 p-4 sm:p-6 rounded-xl shadow-lg">
+            <div class="relative h-[280px] sm:h-[380px]">
+                <canvas id="stockChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 我的最愛清單管理區 -->
+        <div class="bg-gray-800 p-4 sm:p-6 rounded-xl shadow-lg space-y-4">
+            <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-gray-700 pb-3">
+                <div>
+                    <h2 class="text-base sm:text-lg font-bold text-amber-400 flex items-center gap-2">⭐ 我的最愛股票名單</h2>
+                    <p class="text-xs text-gray-400">儲存於本地瀏覽器，支援 JSON 備份轉換</p>
+                </div>
+                <!-- 匯入匯出按鈕群 -->
+                <div class="flex gap-2 self-start sm:self-center">
+                    <button onclick="exportFavorites()" class="bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs px-3 py-1.5 rounded transition cursor-pointer">
+                        📥 導出 JSON 備份
+                    </button>
+                    <label class="bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs px-3 py-1.5 rounded transition cursor-pointer text-center">
+                        📤 匯入 JSON 恢復
+                        <input type="file" id="importFile" accept=".json" class="hidden" onchange="importFavorites(event)">
+                    </label>
+                </div>
+            </div>
+            <!-- 最愛清單顯示區 (標籤型排版，對手機操作極度友善) -->
+            <div id="favoritesContainer" class="flex flex-wrap gap-2">
+                <!-- 透過 JS 動態填入 -->
+                <p class="text-xs text-gray-500 py-2">目前最愛名單空空如也，請利用上方「加最愛」按鈕新增。</p>
+            </div>
+        </div>
+
+        <!-- 全上市股票大清單區塊 -->
+        <div class="bg-gray-800 p-4 sm:p-6 rounded-xl shadow-lg space-y-4">
+            <div class="flex flex-col sm:flex-row justify-between sm:items-start md:items-center gap-3 border-b border-gray-700 pb-3">
+                <div>
+                    <h2 class="text-base sm:text-lg font-bold text-emerald-400">📋 全上市大盤快查總表</h2>
+                    <p class="text-xs text-gray-400">全台股上市標的，點擊「檢查」比對定存利率</p>
+                </div>
+                <div class="w-full sm:w-64">
+                    <input type="text" id="searchStock" placeholder="輸入代碼或名稱搜尋..." class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500">
+                </div>
+            </div>
+
+            <!-- RWD 表格滑動封裝 -->
+            <div class="overflow-x-auto border border-gray-700 rounded-lg">
+                <div class="inline-block min-w-full align-middle">
+                    <div class="overflow-y-auto max-h-[400px]">
+                        <table class="min-w-full divide-y divide-gray-700 text-left">
+                            <thead class="bg-gray-900 sticky top-0 z-10">
+                                <tr class="text-xs text-gray-400 font-semibold uppercase">
+                                    <th class="p-3">股票</th>
+                                    <th class="p-3">殖利率</th>
+                                    <th class="p-3">定存狀態</th>
+                                    <th class="p-3 text-center">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fullStockTableBody" class="divide-y divide-gray-700 text-xs sm:text-sm">
+                                <tr>
+                                    <td colspan="4" class="p-6 text-center text-gray-500 animate-pulse">正在下載 FinMind 全台股資料...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let stockChartInstance = null;
+        let allStocksCached = [];
+        let favorites = JSON.parse(localStorage.getItem('tw_stock_fav')) || ["2330", "2317", "0056"]; // 預設初始最愛
+        const BANK_RATE = 1.70;
+
+        function calculateMA(data, period) {
+            let result = [];
+            for (let i = 0; i < data.length; i++) {
+                if (i < period - 1) { result.push(null); continue; }
+                let sum = 0;
+                for (let j = 0; j < period; j++) { sum += data[i - j]; }
+                result.push(Number((sum / period).toFixed(2)));
+            }
+            return result;
+        }
+
+        // ================= 我的最愛核心模組 =================
+        function updateFavoritesUI() {
+            const container = document.getElementById('favoritesContainer');
+            container.innerHTML = '';
+            
+            if(favorites.length === 0) {
+                container.innerHTML = '<p class="text-xs text-gray-500 py-1">目前無自訂最愛股票</p>';
+                return;
+            }
+
+            favorites.forEach(id => {
+                const badge = document.createElement('div');
+                badge.className = "bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded-lg pl-3 pr-2 py-1 flex items-center gap-2 text-xs font-medium text-gray-200 transition shadow-sm";
+                badge.innerHTML = `
+                    <span onclick="quickSearch('${id}')" class="cursor-pointer font-bold hover:text-emerald-400">${id}</span>
+                    <button onclick="removeFavorite('${id}')" class="text-gray-400 hover:text-rose-400 text-sm font-bold ml-1 cursor-pointer">×</button>
+                `;
+                container.appendChild(badge);
+            });
+            localStorage.setItem('tw_stock_fav', JSON.stringify(favorites));
+        }
+
+        document.getElementById('addFavBtn').addEventListener('click', () => {
+            const currentId = document.getElementById('stockId').value.trim();
+            if(!currentId) return;
+            if(!favorites.includes(currentId)) {
+                favorites.push(currentId);
+                updateFavoritesUI();
+            }
+        });
+
+        function removeFavorite(id) {
+            favorites = favorites.filter(item => item !== id);
+            updateFavoritesUI();
+        }
+
+        // 導出 JSON 備份檔
+        function exportFavorites() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(favorites));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `tw_stock_favorites_${new Date().toISOString().slice(0,10)}.json`);
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+        }
+
+        // 匯入 JSON 恢復檔
+        function importFavorites(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (Array.isArray(imported)) {
+                        favorites = imported;
+                        updateFavoritesUI();
+                        alert('我的最愛資料已順利自本地檔案恢復！');
+                    } else {
+                        alert('檔案格式不正確，應為股票代碼陣列。');
+                    }
+                } catch (err) {
+                    alert('讀取失敗，請確認是否為正確的 JSON 備份檔案。');
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // ================= 數據載入與分析模組 =================
+        async function loadAllListingStocks() {
+            const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockInfo`;
+            try {
+                const response = await fetch(url);
+                const res = await response.json();
+                if (res.status === 200 && res.data) {
+                    allStocksCached = res.data.filter(item => item.industry_category !== '模組' && item.stock_id.length === 4);
+                    renderTable(allStocksCached);
+                }
+            } catch (e) {
+                document.getElementById('fullStockTableBody').innerHTML = `<tr><td colspan="4" class="p-4 text-center text-rose-400">總表加載失敗。</td></tr>`;
+            }
+        }
+
+        function renderTable(stocks) {
+            const tbody = document.getElementById('fullStockTableBody');
+            tbody.innerHTML = '';
+            if (stocks.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-500">查無結果</td></tr>`;
+                return;
+            }
+            stocks.forEach(stock => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-gray-700/30 transition";
+                tr.innerHTML = `
+                    <td class="p-3 font-semibold text-gray-300 whitespace-nowrap">${stock.stock_id}<br class="sm:hidden"><span class="text-xs text-gray-400 sm:ml-2">${stock.stock_name}</span></td>
+                    <td id="yield-${stock.stock_id}" class="p-3 text-gray-500 font-semibold">--</td>
+                    <td id="light-${stock.stock_id}" class="p-3">
+                        <span class="bg-gray-800 text-gray-500 px-2 py-0.5 rounded text-[11px]">未檢</span>
+                    </td>
+                    <td class="p-3 text-center whitespace-nowrap">
+                        <div class="flex flex-col sm:flex-row gap-1 justify-center">
+                            <button onclick="checkRowYield('${stock.stock_id}')" class="bg-gray-700 hover:bg-amber-600 text-white text-[11px] px-2 py-1 rounded transition cursor-pointer">檢查</button>
+                            <button onclick="quickSearch('${stock.stock_id}')" class="bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] px-2 py-1 rounded transition cursor-pointer">看圖</button>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function checkRowYield(stockId) {
+            const yieldCell = document.getElementById(`yield-${stockId}`);
+            const lightCell = document.getElementById(`light-${stockId}`);
+            yieldCell.innerText = "...";
+            try {
+                const res = await fetch(`https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPER&data_id=${stockId}&start_date=2025-01-01`).then(r => r.json());
+                if (res.status === 200 && res.data && res.data.length > 0) {
+                    const currentYield = res.data[res.data.length - 1].dividend_yield || 0;
+                    yieldCell.innerText = `${currentYield}%`;
+                    if (currentYield > BANK_RATE) {
+                        lightCell.innerHTML = `<span class="text-emerald-400 font-bold text-xs">● 綠高</span>`;
+                    } else {
+                        lightCell.innerHTML = `<span class="text-rose-400 font-bold text-xs">● 紅低</span>`;
+                    }
+                } else {
+                    yieldCell.innerText = "無";
+                    lightCell.innerHTML = `<span class="text-gray-500 text-xs">無資料</span>`;
+                }
+            } catch (err) { yieldCell.innerText = "E"; }
+        }
+
+        document.getElementById('searchStock').addEventListener('input', (e) => {
+            const val = e.target.value.trim().toLowerCase();
+            const filtered = allStocksCached.filter(item => item.stock_id.includes(val) || item.stock_name.toLowerCase().includes(val));
+            renderTable(filtered);
+        });
+
+        function quickSearch(stockId) {
+            document.getElementById('stockId').value = stockId;
+            fetchStockData();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        async function fetchStockData() {
+            const stockId = document.getElementById('stockId').value.trim();
+            const startDate = document.getElementById('startDate').value;
+            const loadingStatus = document.getElementById('loadingStatus');
+
+            if (!stockId) return;
+            loadingStatus.classList.remove('hidden');
+
+            try {
+                const [priceRes, perRes] = await Promise.all([
+                    fetch(`https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPrice&data_id=${stockId}&start_date=${startDate}`).then(r => r.json()),
+                    fetch(`https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPER&data_id=${stockId}&start_date=${startDate}`).then(r => r.json())
+                ]);
+
+                if (perRes.status === 200 && perRes.data && perRes.data.length > 0) {
+                    const latest = perRes.data[perRes.data.length - 1];
+                    const currentYield = latest.dividend_yield || 0;
+                    document.getElementById('peValue').innerText = latest.PE ? `${latest.PE} 倍` : '未公布';
+                    document.getElementById('yieldValue').innerText = `${currentYield} %`;
+                    document.getElementById('pbValue').innerText = latest.PB ? `${latest.PB} 倍` : '未公布';
+
+                    const light = document.getElementById('statusLight');
+                    const txt = document.getElementById('statusText');
+                    if (currentYield > BANK_RATE) {
+                        light.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+                        txt.innerText = "高於定存";
+                        txt.className = "text-[10px] text-emerald-400 font-bold";
+                    } else {
+                        light.className = "w-2 h-2 rounded-full bg-rose-500";
+                        txt.innerText = "低於定存";
+                        txt.className = "text-[10px] text-rose-400 font-bold";
+                    }
+                }
+
+                if (priceRes.status === 200 && priceRes.data && priceRes.data.length > 0) {
+                    const rawData = priceRes.data;
+                    renderChart(rawData.map(i=>i.date), rawData.map(i=>i.close), calculateMA(rawData.map(i=>i.close), 5), calculateMA(rawData.map(i=>i.close), 20), stockId);
+                }
+            } catch (error) { console.error(error); } 
+            finally { loadingStatus.classList.add('hidden'); }
+        }
+
+        function renderChart(labels, closePrices, ma5, ma20, stockId) {
+            const ctx = document.getElementById('stockChart').getContext('2d');
+            if (stockChartInstance) { stockChartInstance.destroy(); }
+            stockChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: '收盤價', data: closePrices, borderColor: '#34d399', borderWidth: 2, pointRadius: 1 },
+                        { label: '5MA', data: ma5, borderColor: '#f59e0b', borderWidth: 1.2, pointRadius: 0, borderDash: [2, 2] },
+                        { label: '20MA', data: ma20, borderColor: '#ec4899', borderWidth: 1.2, pointRadius: 0 }
+                    ]
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    scales: { 
+                        x: { ticks: { color: '#9ca3af', font: { size: 10 } } }, 
+                        y: { ticks: { color: '#9ca3af', font: { size: 10 } } } 
+                    } 
+                }
+            });
+        }
+
+        document.getElementById('fetchBtn').addEventListener('click', fetchStockData);
+        window.addEventListener('DOMContentLoaded', () => {
+            updateFavoritesUI();
+            loadAllListingStocks();
+            fetchStockData();
+        });
+    </script>
+</body>
+</html>
